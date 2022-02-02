@@ -568,7 +568,7 @@ struct RelConverter<
 
   static ret_t apply(bool_t value) {
 #ifdef __SYCL_DEVICE_ONLY__
-    typename ret_t::vector_t result(0);
+    typename ret_t::vector_t result{0};
     for (size_t I = 0; I < N; ++I) {
       result[I] = value[I];
     }

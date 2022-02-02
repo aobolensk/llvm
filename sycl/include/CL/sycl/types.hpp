@@ -113,6 +113,122 @@ template <> struct vec_helper<std::byte> {
 };
 #endif
 
+#if defined(__GNUC__) && !defined(__clang__)
+template <typename T, int NumElements> struct vec_helper_gcc;
+
+template <typename T> struct vec_helper_gcc<T, 1> {
+  using Type = T;
+  static constexpr Type get(T value) {
+    Type r = value;
+    return r;
+  }
+};
+
+template <typename T> struct vec_helper_gcc<T, 2> {
+  using Type __attribute__ ((vector_size (sizeof(T) * 2))) = T;
+  static constexpr Type get(T value) {
+    Type r = {value, value};
+    return r;
+  }
+};
+
+template <typename T> struct vec_helper_gcc<T, 3> {
+  using Type __attribute__ ((vector_size (sizeof(T) * 4))) = T;
+  static constexpr Type get(T value) {
+    Type r = {value, value, value, value};
+    return r;
+  }
+};
+
+template <typename T> struct vec_helper_gcc<T, 4> {
+  using Type __attribute__ ((vector_size (sizeof(T) * 4))) = T;
+  static constexpr Type get(T value) {
+    Type r = {value, value, value, value};
+    return r;
+  }
+};
+
+template <typename T> struct vec_helper_gcc<T, 8> {
+  using Type __attribute__ ((vector_size (sizeof(T) * 8))) = T;
+  static constexpr Type get(T value) {
+    Type r = {value, value, value, value, value, value, value, value};
+    return r;
+  }
+};
+
+template <typename T> struct vec_helper_gcc<T, 16> {
+  using Type __attribute__ ((vector_size (sizeof(T) * 16))) = T;
+  static constexpr Type get(T value) {
+    Type r = {value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value};
+    return r;
+  }
+};
+
+#define VEC_HELPER_GCC_FOR_BOOL_IMPL(num_elements) \
+template <> struct vec_helper_gcc<bool, num_elements> { \
+  using Type __attribute__ ((vector_size (sizeof(char) * num_elements))) = char; \
+  static constexpr auto get(bool value) { \
+    return vec_helper_gcc<char, num_elements>::get(static_cast<char>(value)); \
+  } \
+}
+
+template <> struct vec_helper_gcc<bool, 1> {
+  using Type = char;
+  static constexpr Type get(bool value) {
+    Type r = Type(value);
+    return r;
+  }
+};
+
+VEC_HELPER_GCC_FOR_BOOL_IMPL(2);
+VEC_HELPER_GCC_FOR_BOOL_IMPL(4);
+VEC_HELPER_GCC_FOR_BOOL_IMPL(8);
+VEC_HELPER_GCC_FOR_BOOL_IMPL(16);
+
+template <> struct vec_helper_gcc<bool, 3> {
+  using Type __attribute__ ((vector_size (sizeof(char) * 4))) = char;
+  static constexpr auto get(bool value) {
+    return vec_helper_gcc<char, 3>::get(static_cast<char>(value));
+  }
+};
+
+#undef VEC_HELPER_GCC_FOR_BOOL_IMPL
+
+#if __cplusplus >= 201703L && (!defined(_HAS_STD_BYTE) || _HAS_STD_BYTE != 0)
+#define VEC_HELPER_GCC_FOR_STD_BYTE_IMPL(num_elements) \
+template <> struct vec_helper_gcc<std::byte, (num_elements)> { \
+  using Type __attribute__ ((vector_size (sizeof(char) * num_elements))) = char; \
+  static constexpr auto get(std::byte value) { \
+    return vec_helper_gcc<char, (num_elements)>::get(static_cast<char>(value)); \
+  } \
+}
+
+template <> struct vec_helper_gcc<std::byte, 1> {
+  using Type = char;
+  static constexpr Type get(std::byte value) {
+    Type r = Type(value);
+    return r;
+  }
+};
+
+template <> struct vec_helper_gcc<std::byte, 3> {
+  using Type __attribute__ ((vector_size (sizeof(char) * 4))) = char;
+  static constexpr auto get(std::byte value) {
+    return vec_helper_gcc<char, 3>::get(static_cast<char>(value));
+  }
+};
+
+
+VEC_HELPER_GCC_FOR_STD_BYTE_IMPL(2);
+VEC_HELPER_GCC_FOR_STD_BYTE_IMPL(4);
+VEC_HELPER_GCC_FOR_STD_BYTE_IMPL(8);
+VEC_HELPER_GCC_FOR_STD_BYTE_IMPL(16);
+
+#undef VEC_HELPER_GCC_FOR_STD_BYTE_IMPL
+
+#endif // __cplusplus >= 201703L && (!defined(_HAS_STD_BYTE) || _HAS_STD_BYTE != 0)
+#endif // defined(__GNUC__) && !defined(__clang__)
+
 template <typename VecT, typename OperationLeftT, typename OperationRightT,
           template <typename> class OperationCurrentT, int... Indexes>
 class SwizzleOp;
@@ -711,8 +827,17 @@ public:
       T>;
 
   template <typename Ty = DataT>
-  explicit constexpr vec(const EnableIfNotHostHalf<Ty> &arg) {
+  explicit constexpr vec(const EnableIfNotHostHalf<Ty> &arg, typename std::enable_if<std::is_same<Ty, cl::sycl::detail::half_impl::half>::value>::type* = 0) {
     m_Data = (DataType)vec_data<Ty>::get(arg);
+  }
+
+  template <typename Ty = DataT>
+  explicit constexpr vec(const EnableIfNotHostHalf<Ty> &arg, typename std::enable_if<!std::is_same<Ty, cl::sycl::detail::half_impl::half>::value>::type* = 0) {
+#if defined(__GNUC__) && !defined(__clang__)
+    m_Data = detail::vec_helper_gcc<Ty, NumElements>::get(arg);
+#else
+    m_Data = (DataType)vec_data<Ty>::get(arg);
+#endif
   }
 
   template <typename Ty = DataT>
@@ -721,7 +846,11 @@ public:
           std::is_same<typename detail::remove_const_t<Ty>, half>::value,
       vec &>
   operator=(const EnableIfNotHostHalf<Ty> &Rhs) {
+#if defined(__GNUC__) && !defined(__clang__)
+    m_Data = detail::vec_helper_gcc<Ty, NumElements>::get(Rhs);
+#else
     m_Data = (DataType)vec_data<Ty>::get(Rhs);
+#endif
     return *this;
   }
 
@@ -980,10 +1109,25 @@ public:
 
 #ifdef __SYCL_USE_EXT_VECTOR_TYPE__
 #define __SYCL_BINOP(BINOP, OPASSIGN)                                          \
-  template <typename Ty = vec>                                                 \
+  template <                                                                   \
+      typename Ty = vec,                                                       \
+      int Num = NumElements,                                                   \
+      typename std::enable_if<Num != 3, int>::type = 0>                        \
   vec operator BINOP(const EnableIfNotHostHalf<Ty> &Rhs) const {               \
     vec Ret;                                                                   \
     Ret.m_Data = m_Data BINOP Rhs.m_Data;                                      \
+    return Ret;                                                                \
+  }                                                                            \
+  template <                                                                   \
+      typename Ty = vec,                                                       \
+      int Num = NumElements,                                                   \
+      typename std::enable_if<Num == 3, int>::type = 0>                        \
+  vec operator BINOP(const EnableIfNotHostHalf<Ty> &Rhs) const {               \
+    vec Ret;                                                                   \
+    __SYCL_UNROLL(NumElements)                                                 \
+    for (int i = 0; i < NumElements; ++i) {                                    \
+      Ret.m_Data[i] = m_Data[i] BINOP Rhs.m_Data[i];                           \
+    }                                                                          \
     return Ret;                                                                \
   }                                                                            \
   template <typename Ty = vec>                                                 \
@@ -2085,6 +2229,33 @@ __SYCL_RELLOGOP(||)
 
 
 #ifdef __SYCL_USE_EXT_VECTOR_TYPE__
+#if defined(__GNUC__) && !defined(__clang__)
+#define __SYCL_DECLARE_TYPE_VIA_CL_T(type)                                        \
+  using __##type##_t = cl::sycl::cl_##type;                                       \
+  using __##type##2_vec_t =                                                       \
+      cl::sycl::cl_##type __attribute__((vector_size(sizeof(__##type##_t) * 2))); \
+  using __##type##3_vec_t =                                                       \
+      cl::sycl::cl_##type __attribute__((vector_size(sizeof(__##type##_t) * 4))); \
+  using __##type##4_vec_t =                                                       \
+      cl::sycl::cl_##type __attribute__((vector_size(sizeof(__##type##_t) * 4))); \
+  using __##type##8_vec_t =                                                       \
+      cl::sycl::cl_##type __attribute__((vector_size(sizeof(__##type##_t) * 8))); \
+  using __##type##16_vec_t =                                                      \
+      cl::sycl::cl_##type __attribute__((vector_size(sizeof(__##type##_t) * 16)));
+
+#define __SYCL_DECLARE_TYPE_T(type)                                               \
+  using __##type##_t = cl::sycl::type;                                            \
+  using __##type##2_vec_t =                                                       \
+      cl::sycl::type __attribute__((vector_size(sizeof(__##type##_t) * 2)));      \
+  using __##type##3_vec_t =                                                       \
+      cl::sycl::type __attribute__((vector_size(sizeof(__##type##_t) * 4)));      \
+  using __##type##4_vec_t =                                                       \
+      cl::sycl::type __attribute__((vector_size(sizeof(__##type##_t) * 4)));      \
+  using __##type##8_vec_t =                                                       \
+      cl::sycl::type __attribute__((vector_size(sizeof(__##type##_t) * 8)));      \
+  using __##type##16_vec_t =                                                      \
+      cl::sycl::type __attribute__((vector_size(sizeof(__##type##_t) * 16)));
+#else
 #define __SYCL_DECLARE_TYPE_VIA_CL_T(type)                                     \
   using __##type##_t = cl::sycl::cl_##type;                                    \
   using __##type##2_vec_t =                                                    \
@@ -2110,6 +2281,7 @@ __SYCL_RELLOGOP(||)
       cl::sycl::type __attribute__((ext_vector_type(8)));                      \
   using __##type##16_vec_t =                                                   \
       cl::sycl::type __attribute__((ext_vector_type(16)));
+#endif  // defined(__GNUC__) && !defined(__clang__)
 
 __SYCL_DECLARE_TYPE_VIA_CL_T(char)
 __SYCL_DECLARE_TYPE_T(schar)

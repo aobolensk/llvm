@@ -50,7 +50,7 @@ template <int N> struct Boolean {
   using element_type = int8_t;
 
 #ifdef __SYCL_DEVICE_ONLY__
-  using DataType = element_type __attribute__((ext_vector_type(N)));
+  using DataType = element_type __attribute__((ext_vector_type(getNextPowerOfTwo(N))));
   using vector_t = DataType;
 #else
   using DataType = element_type[N];
